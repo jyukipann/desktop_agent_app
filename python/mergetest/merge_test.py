@@ -121,3 +121,4 @@ if __name__ == "__main__":
             xyxy.ravel().tolist(), outline=(0, 255, 0), width=3
         )
     sc.show()
+    print()

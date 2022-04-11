@@ -106,7 +106,7 @@ def GetWordBoxes(image, tool, langs, builder):
     wordBox = tool.image_to_string(
         image,
         lang="script/Japanese" if "script/Japanese" in langs else "eng",
-        builder=pyocr.builders.WordBoxBuilder(tesseract_layout=3), # WordBoxBuilder LineBoxBuilder
+        builder=builder, # WordBoxBuilder LineBoxBuilder
     )
     return wordBox
 
@@ -134,8 +134,8 @@ class Receiver:
         self.loop = asyncio.get_event_loop()
         while(self.is_waiting):
             self.received_data = self.loop.run_until_complete(self.receive())
-            for f in self.onReceive:
-                f(self.received_data)
+            for f,args in self.onReceive:
+                f(self.received_data, **args)
             print(f"received : {self.received_data}")
 
     def stop_waiting(self):
@@ -150,30 +150,27 @@ class Sender:
         self.port = 62000
         self.ip = "127.0.0.1"
         self.addr = (self.ip,self.port)
+        self.data = {}
 
-    def send(self, data:dict):
-        json_data = json.dumps(data)
+    def send(self):
+        json_data = json.dumps(self.data)
         self.socket.sendto(json_data.encode("utf-8"), self.addr)
 
     def close(self):
         self.socket.close()
 
-def Receiver_side():
-    srv = Receiver()
-    srv.wait_recive()
-    srv.stop_waiting()
+def GetDataToSend(region, displayId, displaysInfo, tool, langs, builder):
+    image = ScreenshotDisplay(displayId, displaysInfo)
+    image = image.crop(region) # region=(left,upper,right,lower)
+    wordBoxes = GetWordBoxes(image, tool, langs, builder)
+    wordBoxes = np.array([t.position for t in wordBoxes])
+    dataDict = {"displayId":displayId, "wordBoxes":wordBoxes}
+    return json.dumps(dataDict).encode("utf-8")
 
-def Sender_side():
-    clt = Sender()
-    print("waiting")
-    data = {}
-    while True:
-        try:
-            data[0] = input("send what? : ")
-            clt.send(data)
-        except KeyboardInterrupt:
-            break
-    clt.close()
+def receivedDataToSendData(receivedData, displaysInfo, tool, langs, builder):
+    displayId = receivedData["displayId"]
+    region = receivedData["region"]
+    return GetDataToSend(region, displayId, displaysInfo, tool, langs, builder)
 
 if __name__ == "__main__":
     # print(pyautogui.position()) # クリックは複数画面環境下でも可能っぽい。
@@ -192,9 +189,14 @@ if __name__ == "__main__":
     * キャラ座標(ディスプレイ座標系)
     * ocrする範囲(ディスプレイ座標系)
     """
-
+    ocrTools = GetOcrTools()
+    displaysInfo = GetDisplaysInfo()
     receiver = Receiver()
-    
+    sender = Sender()
+    waitReceive = Process(target=receiver.wait_recive)
+    waitReceive.daemon = True
+    waitReceive.start()
+
 
 
 
