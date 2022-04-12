@@ -135,7 +135,10 @@ class Receiver:
         while(self.is_waiting):
             self.received_data = self.loop.run_until_complete(self.receive())
             for f,args in self.onReceive:
-                f(self.received_data, **args)
+                if args is not None:
+                    f(self.received_data, **args)
+                else :
+                    f(self.received_data)
             print(f"received : {self.received_data}")
 
     def stop_waiting(self):
@@ -144,6 +147,8 @@ class Receiver:
             self.loop.close()
         self.socket.close()
 
+
+
 class Sender:
     def __init__(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -151,6 +156,24 @@ class Sender:
         self.ip = "127.0.0.1"
         self.addr = (self.ip,self.port)
         self.data = {}
+        self.tool, self.langs, self.builder = GetOcrTools()
+        self.displaysInfo = GetDisplaysInfo()
+
+    def GetDataToSend(self, region, displayId):
+        image = ScreenshotDisplay(displayId, self.displaysInfo)
+        image = image.crop(region) # region=(left,upper,right,lower)
+        wordBoxes = GetWordBoxes(image, self.tool, self.langs, self.builder)
+        wordBoxes = np.array([t.position for t in wordBoxes])
+        dataDict = {"displayId":displayId, "wordBoxes":wordBoxes}
+        return json.dumps(dataDict).encode("utf-8")
+
+    def receivedDataToSendData(self, receivedData):
+        displayId = receivedData["displayId"]
+        region = receivedData["region"]
+        return self.GetDataToSend(region, displayId)
+
+    def sendData(self,receivedData):
+        self.socket.sendto(self.receivedDataToSendData(receivedData), self.addr)
 
     def send(self):
         json_data = json.dumps(self.data)
@@ -158,19 +181,6 @@ class Sender:
 
     def close(self):
         self.socket.close()
-
-def GetDataToSend(region, displayId, displaysInfo, tool, langs, builder):
-    image = ScreenshotDisplay(displayId, displaysInfo)
-    image = image.crop(region) # region=(left,upper,right,lower)
-    wordBoxes = GetWordBoxes(image, tool, langs, builder)
-    wordBoxes = np.array([t.position for t in wordBoxes])
-    dataDict = {"displayId":displayId, "wordBoxes":wordBoxes}
-    return json.dumps(dataDict).encode("utf-8")
-
-def receivedDataToSendData(receivedData, displaysInfo, tool, langs, builder):
-    displayId = receivedData["displayId"]
-    region = receivedData["region"]
-    return GetDataToSend(region, displayId, displaysInfo, tool, langs, builder)
 
 if __name__ == "__main__":
     # print(pyautogui.position()) # クリックは複数画面環境下でも可能っぽい。
@@ -189,10 +199,10 @@ if __name__ == "__main__":
     * キャラ座標(ディスプレイ座標系)
     * ocrする範囲(ディスプレイ座標系)
     """
-    ocrTools = GetOcrTools()
-    displaysInfo = GetDisplaysInfo()
+
     receiver = Receiver()
     sender = Sender()
+    receiver.onReceive.append((sender.sendData,None))
     waitReceive = Process(target=receiver.wait_recive)
     waitReceive.daemon = True
     waitReceive.start()
